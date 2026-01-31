@@ -1,0 +1,41 @@
+const express = require("express");
+const crypto = require("crypto");
+const router = express.Router();
+require('dotenv').config();
+
+const SECRET = process.env.UPI_SIGN_SECRET || "default_secret"; // Add this to your .env
+
+// Verify the signature (From your code)
+const verifySignature = ({ amount, ts, sig }) => {
+  const payload = `${amount}|${ts}`;
+  const expected = crypto.createHmac("sha256", SECRET).update(payload).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
+};
+
+const isIOS = (ua = "") => /iphone|ipad|ipod/i.test(ua);
+
+router.get("/pay", (req, res) => {
+  const { amount, ts, sig, vpa, name, note } = req.query;
+
+  // 1. Validation
+  if (!amount || !ts || !sig || !vpa) return res.status(400).send("Invalid Link");
+  
+  // 2. Expiry (Link valid for 30 mins)
+  if (Date.now() - Number(ts) > 30 * 60 * 1000) return res.status(400).send("Link Expired. Ask organizer for a new one.");
+
+  // 3. Signature Check
+  if (!verifySignature({ amount, ts, sig })) return res.status(403).send("Security Check Failed");
+
+  // 4. Generate Intent
+  const upiIntent = `upi://pay?pa=${vpa}&pn=${encodeURIComponent(name || 'Organizer')}&am=${amount}&tn=${encodeURIComponent(note || 'TurfWar')}`;
+
+  // 5. iOS/Android Handling
+  if (isIOS(req.headers["user-agent"])) {
+    return res.send(`<html><script>window.location.href="${upiIntent}";</script><body>Redirecting to payment...</body></html>`);
+  }
+  
+  // Android/Desktop: Redirect to intent
+  res.redirect(upiIntent);
+});
+
+module.exports = router;
