@@ -139,34 +139,80 @@ router.put("/upi", auth, async (req, res) => {
 });
 
 router.get("/pay-redirect", async (req, res) => {
-  const { pa, pn, am, tn } = req.query;
+  let { pa, pn, am, tn } = req.query;
 
-  // Reconstruct the UPI Deep Link
-  // 'cu=INR' is added for better compatibility
-  const upiDeepLink = `upi://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`;
+  // 1. Format Amount (e.g., "10.00")
+  if (am && !am.includes(".")) {
+    am = parseFloat(am).toFixed(2);
+  }
+
+  // 2. Clean & Encode Strings
+  // We keep "+" in the regex if you want spaces to look like "Paise+de+do" 
+  // though standard encoding usually handles spaces as %20.
+  const cleanPn = pn ? pn.replace(/[^a-zA-Z0-9 ]/g, "") : "Merchant";
+  const cleanTn = tn ? tn.replace(/[^a-zA-Z0-9 ]/g, "") : "Payment";
+
+  const encodedPn = encodeURIComponent(cleanPn);
+  const encodedTn = encodeURIComponent(cleanTn); // Encodes spaces to %20 or +
+
+  // 3. CONSTRUCT THE EXACT QUERY STRING
+  // Added: mode=02, ver=01, txntype=pay, orgid=000000 (Generic ID), qrmedium=02
+  const queryParams = `mode=02&ver=01&pa=${pa}&pn=${encodedPn}&txntype=pay&qrmedium=02&tn=${encodedTn}&am=${am}&orgid=000000&cu=INR`;
+
+  const links = {
+    generic: `upi://pay?${queryParams}`,
+    phonepe: `phonepe://pay?${queryParams}`,
+    paytm: `paytmmp://pay?${queryParams}`,
+    gpay: `gpay://upi/pay?${queryParams}`, 
+    mobikwik: `mobikwik://upi/pay?${queryParams}`
+  };
 
   const html = `
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Paying ${pn}...</title>
+        <title>Pay ₹${am}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body { font-family: -apple-system, sans-serif; text-align: center; padding: 40px 20px; background: #f3f4f6; }
-          .loader { border: 4px solid #f3f3f3; border-top: 4px solid #10b981; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
-          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-          .btn { background: #10b981; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; display: inline-block; margin-top: 15px; }
+           body { font-family: -apple-system, sans-serif; text-align: center; padding: 20px; background: #f3f4f6; color: #1f2937; }
+           .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; margin: 20px auto; }
+           
+           h2 { margin: 0 0 10px 0; color: #10b981; }
+           p { color: #6b7280; margin-bottom: 25px; }
+           .amount { font-size: 2.5rem; font-weight: 800; color: #111827; margin: 10px 0; }
+           
+           .btn { 
+             display: flex; align-items: center; justify-content: center;
+             width: 100%; padding: 14px; margin-bottom: 12px;
+             border-radius: 10px; text-decoration: none; 
+             color: white; font-weight: 600; font-size: 16px; 
+           }
+           
+           .phonepe { background: #5f259f; }
+           .paytm { background: #00baf2; }
+           .gpay { background: #3c4043; }
+           .mobikwik { background: #0093d6; }
+           .generic { background: #10b981; margin-top: 10px; }
+           .note { font-size: 12px; color: #9ca3af; margin-top: 20px; }
         </style>
       </head>
       <body>
-        <h3>Opening Payment App...</h3>
-        <p>Paying <strong>₹${am}</strong> to ${pn}</p>
-        <div class="loader"></div>
-        <p style="font-size: 0.9em; color: #666;">If nothing happens, tap the button below:</p>
-        <a class="btn" href="${upiDeepLink}">Pay Now</a>
-        <script>
-          setTimeout(function() { window.location.href = "${upiDeepLink}"; }, 1000);
-        </script>
+        <div class="card">
+          <h2>TurfWar Payment</h2>
+          <div class="amount">₹${am}</div>
+          <p>To: <strong>${cleanPn}</strong></p>
+          
+          <a class="btn phonepe" href="${links.phonepe}">Pay via PhonePe</a>
+          <a class="btn paytm" href="${links.paytm}">Pay via Paytm</a>
+          <a class="btn gpay" href="${links.gpay}">Pay via Google Pay</a>
+          <a class="btn mobikwik" href="${links.mobikwik}">Pay via MobiKwik</a>
+          
+          <a class="btn generic" href="${links.generic}">Other UPI Apps</a>
+
+          <div class="note">
+            If payment fails, try a different app.<br/>
+          </div>
+        </div>
       </body>
     </html>
   `;
